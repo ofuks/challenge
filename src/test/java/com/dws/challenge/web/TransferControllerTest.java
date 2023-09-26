@@ -2,7 +2,6 @@ package com.dws.challenge.web;
 
 import com.dws.challenge.domain.Account;
 import com.dws.challenge.dto.TransferResponse;
-import com.dws.challenge.repository.TransferRepository;
 import com.dws.challenge.service.AccountsService;
 import com.dws.challenge.service.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,8 +39,6 @@ class TransferControllerTest {
     private WebApplicationContext webApplicationContext;
     @Autowired
     private AccountsService accountsService;
-    @Autowired
-    private TransferRepository transferRepository;
     @MockBean
     private NotificationService notificationService;
 
@@ -53,7 +50,6 @@ class TransferControllerTest {
         this.mockMvc = webAppContextSetup(this.webApplicationContext).build();
 
         accountsService.getAccountsRepository().clearAccounts();
-        transferRepository.clear();
 
         account1 = new Account("acc-1", new BigDecimal(1000));
         account2 = new Account("acc-2", new BigDecimal(1000));
