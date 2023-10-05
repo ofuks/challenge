@@ -6,7 +6,6 @@ import com.dws.challenge.dto.TransferResponse;
 import com.dws.challenge.exception.CannotExecuteTransferException;
 import com.dws.challenge.mapper.TransferMapper;
 import com.dws.challenge.repository.AccountsRepository;
-import com.dws.challenge.repository.TransferRepository;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,12 +28,12 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 @Repository
 @RequiredArgsConstructor
 public class TransferService {
+    private static final String INSUFFICIENT_BALANCE_MESSAGE = "Insufficient balance in the fromAccount";
     private static final String TRANSFER_MESSAGE_FROM = "Successfully transfer %s from your account to %s";
     private static final String TRANSFER_MESSAGE_TO = "Successfully received %s on your account from %s";
 
     private final Map<String, Lock> accountLocks = new ConcurrentHashMap<>();
 
-    private final TransferRepository transferRepository;
     private final AccountsRepository accountsRepository;
     private final NotificationService notificationService;
     private final TransferMapper transferMapper;
@@ -61,7 +60,7 @@ public class TransferService {
         Account fromAccount = getAccountOrThrow(accountIdFrom);
         Account toAccount = getAccountOrThrow(accountIdTo);
         if (fromAccount.getBalance().compareTo(amount) < 0) {
-            throw new ResponseStatusException(BAD_REQUEST, "Insufficient balance in the fromAccount");
+            throw new ResponseStatusException(BAD_REQUEST, INSUFFICIENT_BALANCE_MESSAGE);
         }
 
         var transfer = this.transfer(fromAccount, toAccount, amount);
@@ -93,37 +92,31 @@ public class TransferService {
         Lock fromAccountLock = accountLocks.computeIfAbsent(fromAccount.getAccountId(), accountId -> new ReentrantLock());
         Lock toAccountLock = accountLocks.computeIfAbsent(toAccount.getAccountId(), accountId -> new ReentrantLock());
 
-        try {
-            fromAccountLock.lock();
-            try {
-                toAccountLock.lock();
-                return executeTransfer(amount, fromAccount, toAccount);
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException(e);
-            } catch (Exception e) {
-                log.warn("Cannot acquire lock for toAccount {}", toAccount, e);
-            } finally {
+        Optional<Transfer> transfer = Optional.empty();
+        if (fromAccountLock.tryLock()) {
+            if (toAccountLock.tryLock()) {
+                transfer = executeTransfer(amount, fromAccount, toAccount);
                 toAccountLock.unlock();
+            } else {
+                log.warn("Cannot acquire lock for toAccount {}", toAccount);
             }
-        } catch (Exception e) {
-            log.warn("Cannot acquire lock for fromAccount {}", fromAccount, e);
-        } finally {
             fromAccountLock.unlock();
+        } else {
+            log.warn("Cannot acquire lock for fromAccount {}", fromAccount);
         }
-        return Optional.empty();
+        return transfer;
     }
 
     private Optional<Transfer> executeTransfer(BigDecimal amount, Account fromAccount, Account toAccount) {
         if (fromAccount.getBalance().compareTo(amount) < 0) {
-            throw new IllegalArgumentException("Insufficient balance in the fromAccount");
+            throw new IllegalArgumentException(INSUFFICIENT_BALANCE_MESSAGE);
         }
         fromAccount.setBalance(fromAccount.getBalance().subtract(amount));
         toAccount.setBalance(toAccount.getBalance().add(amount));
 
         Transfer transfer = buildTransfer(fromAccount.getAccountId(), toAccount.getAccountId(), amount);
-        Transfer savedTransfer = transferRepository.save(transfer);
-        log.info("Successfully saved transfer {}", savedTransfer);
-        return Optional.of(savedTransfer);
+        log.info("Successfully made a transfer {}", transfer);
+        return Optional.of(transfer);
     }
 
 }
