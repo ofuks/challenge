@@ -59,9 +59,6 @@ public class TransferService {
 
         Account fromAccount = getAccountOrThrow(accountIdFrom);
         Account toAccount = getAccountOrThrow(accountIdTo);
-        if (fromAccount.getBalance().compareTo(amount) < 0) {
-            throw new ResponseStatusException(BAD_REQUEST, INSUFFICIENT_BALANCE_MESSAGE);
-        }
 
         var transfer = this.transfer(fromAccount, toAccount, amount);
 
@@ -94,13 +91,19 @@ public class TransferService {
 
         Optional<Transfer> transfer = Optional.empty();
         if (fromAccountLock.tryLock()) {
-            if (toAccountLock.tryLock()) {
-                transfer = executeTransfer(amount, fromAccount, toAccount);
-                toAccountLock.unlock();
-            } else {
-                log.warn("Cannot acquire lock for toAccount {}", toAccount);
+            try {
+                if (toAccountLock.tryLock()) {
+                    try {
+                        transfer = executeTransfer(amount, fromAccount, toAccount);
+                    } finally {
+                        toAccountLock.unlock();
+                    }
+                } else {
+                    log.warn("Cannot acquire lock for toAccount {}", toAccount);
+                }
+            } finally {
+                fromAccountLock.unlock();
             }
-            fromAccountLock.unlock();
         } else {
             log.warn("Cannot acquire lock for fromAccount {}", fromAccount);
         }
@@ -109,7 +112,7 @@ public class TransferService {
 
     private Optional<Transfer> executeTransfer(BigDecimal amount, Account fromAccount, Account toAccount) {
         if (fromAccount.getBalance().compareTo(amount) < 0) {
-            throw new IllegalArgumentException(INSUFFICIENT_BALANCE_MESSAGE);
+            throw new ResponseStatusException(BAD_REQUEST, INSUFFICIENT_BALANCE_MESSAGE);
         }
         fromAccount.setBalance(fromAccount.getBalance().subtract(amount));
         toAccount.setBalance(toAccount.getBalance().add(amount));
